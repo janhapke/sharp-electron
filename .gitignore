@@ -1,0 +1,5 @@
+node_modules/
+dist/
+package/linux-x64/
+# generated at package time from the root README.md (npm shows the package's own README)
+package/README.md

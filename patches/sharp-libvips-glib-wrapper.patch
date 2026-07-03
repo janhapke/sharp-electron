@@ -1,0 +1,141 @@
+diff --git a/build/posix.sh b/build/posix.sh
+index 3ab5abb..0ec66eb 100755
+--- a/build/posix.sh
++++ b/build/posix.sh
+@@ -379,9 +379,29 @@ if [ "$LINUX" = true ]; then
+   # Ensure symbols from external libs (except for libglib-2.0.a and libgobject-2.0.a) are not exposed
+   EXCLUDE_LIBS=$(find ${TARGET}/lib -maxdepth 1 -name '*.a' ! -name 'libglib-2.0.a' ! -name 'libgobject-2.0.a' -printf "-Wl,--exclude-libs=%f ")
+   EXCLUDE_LIBS=${EXCLUDE_LIBS%?}
+-  # Localize the g_param_spec_types symbol to avoid collisions with shared libraries
+-  # See: https://github.com/lovell/sharp/issues/2535#issuecomment-766400693
+-  printf "{local:g_param_spec_types;};" > vips.map
++  # sharp-electron: compile our vips_g_* wrapper (renamed re-exports of the
++  # glib/gobject calls sharp's own native addon reaches for directly) into
++  # libvips-cpp.so, so it has a public, non-colliding symbol to call once
++  # everything else is localized below.
++  cp "$PACKAGE/extra/glib_wrapper.c" "$PACKAGE/extra/glib_wrapper.h" cplusplus/
++  sed -i'.bak' "s/'VImage.cpp',/'glib_wrapper.c',\n    'VImage.cpp',/" cplusplus/meson.build
++  # sharp-electron: VImage8.h's VObject smart pointer calls bare g_object_ref/
++  # g_object_unref inline, in a header consumers like sharp #include directly —
++  # so those calls get compiled straight into sharp.node's own object code,
++  # not just libvips-cpp.so's. Redirect them to our renamed wrapper too, and
++  # make the wrapper header installable alongside VImage8.h so external
++  # consumers can reach it after linking against this library.
++  cp "$PACKAGE/extra/glib_wrapper.h" cplusplus/include/vips/
++  sed -i'.bak' "s|#include <vips/vips.h>|#include <vips/vips.h>\n#include \"glib_wrapper.h\"|" cplusplus/include/vips/VImage8.h
++  sed -i'.bak' -e "s/g_object_ref(/vips_g_object_ref(/g" -e "s/g_object_unref(/vips_g_object_unref(/g" cplusplus/include/vips/VImage8.h
++  sed -i'.bak' "s/'VImage8.h',/'VImage8.h',\n    'glib_wrapper.h',/" cplusplus/include/vips/meson.build
++  # sharp-electron: hide the full glib/gobject symbol surface (previously only
++  # g_param_spec_types was localized) to avoid collisions with a second,
++  # independently-loaded copy of glib in the same process — e.g. Electron's
++  # Linux binary, which dynamically links the system glib for GTK integration.
++  # Only our renamed vips_g_* wrappers and vips's own C/C++ symbols stay public.
++  # See: https://github.com/electron/electron/issues/46323
++  printf '{global: vips_*; _Z*; local: *;};' > vips.map
+ fi
+ # Disable building man pages, gettext po files, tools, and (fuzz-)tests
+ sed -i'.bak' "/subdir('man')/{N;N;N;N;d;}" meson.build
+diff --git a/extra/glib_wrapper.c b/extra/glib_wrapper.c
+new file mode 100644
+index 0000000..3198eb1
+--- /dev/null
++++ b/extra/glib_wrapper.c
+@@ -0,0 +1,32 @@
++#include "glib_wrapper.h"
++
++gpointer vips_g_object_ref(gpointer object) {
++  return g_object_ref(object);
++}
++
++void vips_g_object_unref(gpointer object) {
++  g_object_unref(object);
++}
++
++gpointer vips_g_malloc(gsize n_bytes) {
++  return g_malloc(n_bytes);
++}
++
++void vips_g_free(gpointer mem) {
++  g_free(mem);
++}
++
++gulong vips_g_signal_connect_data(gpointer instance,
++	const gchar *detailed_signal, GCallback c_handler, gpointer data,
++	GClosureNotify notify, GConnectFlags connect_flags) {
++  return g_signal_connect_data(instance, detailed_signal, c_handler, data, notify, connect_flags);
++}
++
++guint vips_g_log_set_handler(const gchar *log_domain,
++	GLogLevelFlags log_levels, GLogFunc log_func, gpointer user_data) {
++  return g_log_set_handler(log_domain, log_levels, log_func, user_data);
++}
++
++gboolean vips_g_utf8_validate(const gchar *str, gssize max_len, const gchar **end) {
++  return g_utf8_validate(str, max_len, end);
++}
+diff --git a/extra/glib_wrapper.h b/extra/glib_wrapper.h
+new file mode 100644
+index 0000000..67730e5
+--- /dev/null
++++ b/extra/glib_wrapper.h
+@@ -0,0 +1,60 @@
++#ifndef VIPS_GLIB_WRAPPER_H
++#define VIPS_GLIB_WRAPPER_H
++
++#include <glib-object.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++ * Renamed re-exports of glib/gobject entry points that sharp's own native
++ * addon calls directly. libvips-cpp.so's own glib/gobject symbols are hidden
++ * from the dynamic symbol table (see vips.map) to avoid colliding with a
++ * second, independently-loaded copy of glib inside the same process (e.g.
++ * Electron's Linux binary, which links the system glib for GTK integration).
++ * These vips_g_* wrappers stay public so external callers still have a way
++ * to reach the copy of glib statically linked into this library.
++ *
++ * libvips-cpp.so is built with gnu_symbol_visibility: 'hidden', which applies
++ * at compile time and is stronger than the vips.map version script (the
++ * version script can only promote symbols the compiler already emitted as
++ * default-visibility) — so these need an explicit visibility attribute or
++ * they silently vanish from the dynamic symbol table entirely.
++ */
++#define VIPS_G_WRAPPER_EXPORT __attribute__((visibility("default")))
++
++VIPS_G_WRAPPER_EXPORT gpointer vips_g_object_ref(gpointer object);
++VIPS_G_WRAPPER_EXPORT void vips_g_object_unref(gpointer object);
++
++/*
++ * The rest of this set was found empirically, not guessed upfront: grepping
++ * sharp's own src *.cc files for bare g_* calls turned up g_free/g_malloc (both
++ * needed together — an allocator and its matching free must come from the
++ * same glib copy, or it's a heap corruption bug, not just a symbol nicety),
++ * g_signal_connect (a macro around g_signal_connect_data), and
++ * g_log_set_handler.
++ */
++VIPS_G_WRAPPER_EXPORT gpointer vips_g_malloc(gsize n_bytes);
++VIPS_G_WRAPPER_EXPORT void vips_g_free(gpointer mem);
++VIPS_G_WRAPPER_EXPORT gulong vips_g_signal_connect_data(gpointer instance,
++	const gchar *detailed_signal, GCallback c_handler, gpointer data,
++	GClosureNotify notify, GConnectFlags connect_flags);
++VIPS_G_WRAPPER_EXPORT guint vips_g_log_set_handler(const gchar *log_domain,
++	GLogLevelFlags log_levels, GLogFunc log_func, gpointer user_data);
++
++/*
++ * Found by running sharp's own test suite against the rebuilt addon (the real
++ * gate this whole wrapper set has to pass) — an initial exhaustive grep of
++ * every g_* call in sharp's src/*.cc missed this one on the first pass, and
++ * only running the test suite (not just a clean build) surfaced it as an
++ * `undefined symbol: g_utf8_validate` dlopen failure. Expect a future version
++ * bump to surface a symbol the same way — the test gates are load-bearing.
++ */
++VIPS_G_WRAPPER_EXPORT gboolean vips_g_utf8_validate(const gchar *str, gssize max_len, const gchar **end);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif

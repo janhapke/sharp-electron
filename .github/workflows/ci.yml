@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # Runs the full Linux pipeline (patches -> Phase A -> Phase B -> both test
+  # gates -> local packaging) on every push/PR. This is what actually keeps
+  # README.md's claims honest going forward, rather than relying on
+  # occasional manual runs.
+  linux-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - run: npm install
+
+      - name: Full build + both test gates + local packaging
+        run: npm run build
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: package-linux-x64
+          path: package/linux-x64
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Validates the non-Linux fallback (re-exporting real `sharp` unmodified)
+  # for real, on real macOS/Windows runners — this path is otherwise
+  # unverifiable on the maintainer's Linux-only dev machine. Deliberately
+  # independent of the linux-build job above: doesn't need the Phase A/B
+  # binaries at all, since the fallback branch never touches them.
+  cross-platform-fallback:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-13, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      # Installs package/package.json's own "sharp" dependency (the real,
+      # official npm package) — this is the one npm quirk documented in
+      # README.md: an out-of-tree file: dependency doesn't get its
+      # own dependencies installed automatically, so this has to happen
+      # explicitly rather than relying on some outer npm install to do it.
+      - name: Install package/'s own dependencies (real sharp, for the fallback)
+        working-directory: package
+        run: npm install --omit=dev
+
+      - name: Confirm the non-Linux fallback resolves to real sharp and works
+        shell: bash
+        run: |
+          node -e "
+            const sharp = require('./package/index.js');
+            (async () => {
+              console.log('platform:', process.platform, process.arch);
+              console.log('sharp version:', sharp.versions.sharp);
+              const raw = Buffer.alloc(64 * 64 * 3, 128);
+              const jpeg = await sharp(raw, { raw: { width: 64, height: 64, channels: 3 } }).jpeg().toBuffer();
+              console.log('encode ok:', jpeg.length, 'bytes');
+              const meta = await sharp(jpeg).metadata();
+              console.log('metadata ok:', meta.width, 'x', meta.height);
+              const resized = await sharp(jpeg).resize(32, 32).toBuffer();
+              console.log('resize ok:', resized.length, 'bytes');
+              console.log('PASS');
+            })().catch((err) => { console.error('FAIL', err); process.exit(1); });
+          "

@@ -1,0 +1,42 @@
+{
+  "name": "@janhapke/sharp-electron",
+  "version": "0.35.3-electron.0",
+  "description": "Electron-safe replacement for sharp on Linux; re-exports the real sharp unmodified everywhere else",
+  "author": "Jan Hapke <sharp-electron@janhapke.com>",
+  "type": "commonjs",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/janhapke/sharp-electron#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/janhapke/sharp-electron.git",
+    "directory": "package"
+  },
+  "bugs": {
+    "url": "https://github.com/janhapke/sharp-electron/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "sharp",
+    "libvips",
+    "electron",
+    "image",
+    "jpeg",
+    "png",
+    "resize"
+  ],
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "linux-x64"
+  ],
+  "dependencies": {
+    "sharp": "0.35.3"
+  }
+}

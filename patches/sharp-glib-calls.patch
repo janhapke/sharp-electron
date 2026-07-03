@@ -1,0 +1,114 @@
+diff --git a/src/common.cc b/src/common.cc
+index 35494551..ae19af63 100644
+--- a/src/common.cc
++++ b/src/common.cc
+@@ -812,7 +812,10 @@ namespace sharp {
+     Called when a Buffer undergoes GC, required to support mixed runtime libraries in Windows
+   */
+   std::function<void(void*, char*)> FreeCallback = [](void*, char* data) {
+-    g_free(data);
++    // sharp-electron: must use the same glib copy that allocated this memory
++    // (via vips_g_malloc in metadata.cc) — see the redirected g_log_set_handler
++    // call in sharp.cc for why bare g_free isn't safe here on Linux/Electron.
++    vips_g_free(data);
+   };
+ 
+   /*
+@@ -851,7 +854,10 @@ namespace sharp {
+       if (im->progress_signal == NULL) {
+         int *timeout = VIPS_NEW(im, int);
+         *timeout = seconds;
+-        g_signal_connect(im, "eval", G_CALLBACK(VipsProgressCallBack), timeout);
++        // sharp-electron: redirected from the g_signal_connect macro, which
++        // expands to g_signal_connect_data(..., NULL, (GConnectFlags) 0)
++        vips_g_signal_connect_data(im, "eval", G_CALLBACK(VipsProgressCallBack), timeout,
++          NULL, (GConnectFlags) 0);
+         vips_image_set_progress(im, true);
+       }
+     }
+diff --git a/src/metadata.cc b/src/metadata.cc
+index 9e027b14..4b437d2c 100644
+--- a/src/metadata.cc
++++ b/src/metadata.cc
+@@ -105,7 +105,7 @@ class MetadataWorker : public Napi::AsyncWorker {
+       if (image.get_typeof(VIPS_META_EXIF_NAME) == VIPS_TYPE_BLOB) {
+         size_t exifLength;
+         void const *exif = image.get_blob(VIPS_META_EXIF_NAME, &exifLength);
+-        baton->exif = static_cast<char*>(g_malloc(exifLength));
++        baton->exif = static_cast<char*>(vips_g_malloc(exifLength));
+         memcpy(baton->exif, exif, exifLength);
+         baton->exifLength = exifLength;
+       }
+@@ -113,7 +113,7 @@ class MetadataWorker : public Napi::AsyncWorker {
+       if (image.get_typeof(VIPS_META_ICC_NAME) == VIPS_TYPE_BLOB) {
+         size_t iccLength;
+         void const *icc = image.get_blob(VIPS_META_ICC_NAME, &iccLength);
+-        baton->icc = static_cast<char*>(g_malloc(iccLength));
++        baton->icc = static_cast<char*>(vips_g_malloc(iccLength));
+         memcpy(baton->icc, icc, iccLength);
+         baton->iccLength = iccLength;
+       }
+@@ -121,7 +121,7 @@ class MetadataWorker : public Napi::AsyncWorker {
+       if (image.get_typeof(VIPS_META_IPTC_NAME) == VIPS_TYPE_BLOB) {
+         size_t iptcLength;
+         void const *iptc = image.get_blob(VIPS_META_IPTC_NAME, &iptcLength);
+-        baton->iptc = static_cast<char *>(g_malloc(iptcLength));
++        baton->iptc = static_cast<char *>(vips_g_malloc(iptcLength));
+         memcpy(baton->iptc, iptc, iptcLength);
+         baton->iptcLength = iptcLength;
+       }
+@@ -129,7 +129,7 @@ class MetadataWorker : public Napi::AsyncWorker {
+       if (image.get_typeof(VIPS_META_XMP_NAME) == VIPS_TYPE_BLOB) {
+         size_t xmpLength;
+         void const *xmp = image.get_blob(VIPS_META_XMP_NAME, &xmpLength);
+-        baton->xmp = static_cast<char *>(g_malloc(xmpLength));
++        baton->xmp = static_cast<char *>(vips_g_malloc(xmpLength));
+         memcpy(baton->xmp, xmp, xmpLength);
+         baton->xmpLength = xmpLength;
+       }
+@@ -137,7 +137,7 @@ class MetadataWorker : public Napi::AsyncWorker {
+       if (image.get_typeof(VIPS_META_PHOTOSHOP_NAME) == VIPS_TYPE_BLOB) {
+         size_t tifftagPhotoshopLength;
+         void const *tifftagPhotoshop = image.get_blob(VIPS_META_PHOTOSHOP_NAME, &tifftagPhotoshopLength);
+-        baton->tifftagPhotoshop = static_cast<char *>(g_malloc(tifftagPhotoshopLength));
++        baton->tifftagPhotoshop = static_cast<char *>(vips_g_malloc(tifftagPhotoshopLength));
+         memcpy(baton->tifftagPhotoshop, tifftagPhotoshop, tifftagPhotoshopLength);
+         baton->tifftagPhotoshopLength = tifftagPhotoshopLength;
+       }
+@@ -145,7 +145,7 @@ class MetadataWorker : public Napi::AsyncWorker {
+       if (image.get_typeof("gainmap-data") == VIPS_TYPE_BLOB) {
+         size_t gainMapLength;
+         void const *gainMap = image.get_blob("gainmap-data", &gainMapLength);
+-        baton->gainMap = static_cast<char *>(g_malloc(gainMapLength));
++        baton->gainMap = static_cast<char *>(vips_g_malloc(gainMapLength));
+         memcpy(baton->gainMap, gainMap, gainMapLength);
+         baton->gainMapLength = gainMapLength;
+       }
+@@ -316,7 +316,10 @@ class MetadataWorker : public Napi::AsyncWorker {
+         info.Set("iptc", Napi::Buffer<char>::NewOrCopy(env, baton->iptc, baton->iptcLength, sharp::FreeCallback));
+       }
+       if (baton->xmpLength > 0) {
+-        if (g_utf8_validate(static_cast<char const *>(baton->xmp), baton->xmpLength, nullptr)) {
++        // sharp-electron: redirected from bare g_utf8_validate — found via
++        // sharp's own test suite failing with an undefined-symbol dlopen
++        // error, not the initial grep pass. See glib_wrapper.h.
++        if (vips_g_utf8_validate(static_cast<char const *>(baton->xmp), baton->xmpLength, nullptr)) {
+           info.Set("xmpAsString",
+             Napi::String::New(env, static_cast<char const *>(baton->xmp), baton->xmpLength));
+         }
+diff --git a/src/sharp.cc b/src/sharp.cc
+index 7678975c..37dbdefd 100644
+--- a/src/sharp.cc
++++ b/src/sharp.cc
+@@ -20,7 +20,10 @@ Napi::Object init(Napi::Env env, Napi::Object exports) {
+     vips_init("sharp");
+   });
+ 
+-  g_log_set_handler("VIPS", static_cast<GLogLevelFlags>(G_LOG_LEVEL_WARNING),
++  // sharp-electron: redirected from bare g_log_set_handler, which resolves
++  // against whatever glib copy is loaded process-wide (colliding with
++  // Electron's system glib on Linux) now that libvips-cpp.so hides its own.
++  vips_g_log_set_handler("VIPS", static_cast<GLogLevelFlags>(G_LOG_LEVEL_WARNING),
+     static_cast<GLogFunc>(sharp::VipsWarningCallback), nullptr);
+ 
+   // Methods available to JavaScript

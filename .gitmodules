@@ -1,0 +1,6 @@
+[submodule "vendor/sharp-libvips"]
+	path = vendor/sharp-libvips
+	url = https://github.com/lovell/sharp-libvips.git
+[submodule "vendor/sharp"]
+	path = vendor/sharp
+	url = https://github.com/lovell/sharp.git

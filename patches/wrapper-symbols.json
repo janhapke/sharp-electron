@@ -1,0 +1,69 @@
+{
+  "$schema-comment": "Source of truth for which glib/gobject symbols this project renames and re-exports as vips_g_* wrappers (see extra/glib_wrapper.c/.h in vendor/sharp-libvips), and why each one is there. /rebuild-for-version and any human doing a version bump should diff a fresh grep of sharp's source against this list, not against the prose in README.md.",
+  "targetVersions": {
+    "sharp": "0.35.3",
+    "sharpLibvips": "1.3.2"
+  },
+  "symbols": [
+    {
+      "name": "g_object_ref",
+      "origin": "libvips-header",
+      "originDetail": "cplusplus/include/vips/VImage8.h, VObject smart-pointer class (constructor/copy-assignment) — header-only, inlined into sharp.node wherever vips::VImage is used",
+      "risk": "load-bearing",
+      "riskDetail": "Confirmed root cause of the original segfault. Touches a VipsImage's embedded GObject refcount/type-registration state, which lives in whichever glib copy registered that GType (libvips's private one).",
+      "foundVia": "grep (guessed first, then confirmed as the crash cause during initial diagnosis)"
+    },
+    {
+      "name": "g_object_unref",
+      "origin": "libvips-header",
+      "originDetail": "cplusplus/include/vips/VImage8.h, VObject smart-pointer class (copy-assignment/destructor)",
+      "risk": "load-bearing",
+      "riskDetail": "Same reasoning as g_object_ref — must come from the same glib copy that did the matching ref.",
+      "foundVia": "grep (guessed first, then confirmed as the crash cause during initial diagnosis)"
+    },
+    {
+      "name": "g_malloc",
+      "origin": "sharp-source",
+      "originDetail": "src/metadata.cc, 6 call sites (EXIF/ICC/IPTC/XMP/Photoshop-tag/gain-map blob allocation)",
+      "risk": "probably-unnecessary-but-free",
+      "riskDetail": "Modern glib (post-2.46) is a thin passthrough to the system malloc/free with no private allocator state, so mixing copies here is likely safe in practice. Wrapped anyway since the mechanism already exists and the marginal cost is one line.",
+      "foundVia": "grep"
+    },
+    {
+      "name": "g_free",
+      "origin": "sharp-source",
+      "originDetail": "src/common.cc, FreeCallback (paired with the g_malloc allocations above via napi Buffer::NewOrCopy)",
+      "risk": "probably-unnecessary-but-free",
+      "riskDetail": "Must match whichever allocator did the corresponding g_malloc — see that entry.",
+      "foundVia": "grep"
+    },
+    {
+      "name": "g_signal_connect_data",
+      "origin": "sharp-source",
+      "originDetail": "src/common.cc, SetTimeout() — sharp's own source calls the g_signal_connect macro, which expands to this function",
+      "risk": "load-bearing",
+      "riskDetail": "Connects a signal on a VipsImage (a libvips-private GObject); signal IDs are looked up in glib's global signal registry, which lives in whichever copy registered the GType. Not independently crash-tested in isolation, but the same class of risk as g_object_ref's confirmed failure mode.",
+      "foundVia": "grep"
+    },
+    {
+      "name": "g_log_set_handler",
+      "origin": "sharp-source",
+      "originDetail": "src/sharp.cc, init() — registers VipsWarningCallback for the \"VIPS\" log domain",
+      "risk": "silent-correctness",
+      "riskDetail": "Not a crash risk, but libvips's own internal g_warning()/g_log() calls go through its private glib. Registering the handler via a different glib copy means it silently never fires — no crash, just broken warning capture.",
+      "foundVia": "grep"
+    },
+    {
+      "name": "g_utf8_validate",
+      "origin": "sharp-source",
+      "originDetail": "src/metadata.cc, XMP metadata validation before returning it as a string",
+      "risk": "unknown-not-crash-tested",
+      "riskDetail": "Missed on the first grep pass entirely. Only surfaced as a runtime `undefined symbol` dlopen failure when running sharp's own test suite (test/unit/metadata.js) against the rebuilt addon — a clean build and a passing git apply were not sufficient evidence the wrapper set was complete.",
+      "foundVia": "test-suite-failure"
+    }
+  ],
+  "headersChecked": {
+    "note": "Other libvips public C++ headers pulled in via <vips/vips8> were checked for the same inline-glib-call pattern VImage8.h has. None had it, as of the target versions above.",
+    "clean": ["VError8.h", "VInterpolate8.h", "VRegion8.h", "VConnection8.h"]
+  }
+}

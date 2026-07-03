@@ -1,0 +1,22 @@
+{
+  "name": "sharp-electron-dev",
+  "private": true,
+  "description": "Dev workspace for building @janhapke/sharp-electron",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "repro": "ELECTRON_RUN_AS_NODE=1 electron test/electron-crash-repro.js",
+    "build:libvips": "./scripts/build-libvips.sh",
+    "build:sharp": "./scripts/build-sharp.sh",
+    "test:gates": "./scripts/run-gates.sh",
+    "package": "./scripts/package-local.sh",
+    "build": "./scripts/build-all.sh",
+    "release": "./scripts/release.sh"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "sharp": "0.35.3"
+  }
+}
