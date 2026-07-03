@@ -160,11 +160,13 @@ This is deliberately a guided Claude Code command, not a blind script: [.claude/
 4. Rebuilds, runs both gates, and follows the wrapper-expansion loop above (bounded to 3 iterations before stopping to report).
 5. Re-verifies symbol visibility (`objdump -T`) and `DT_RPATH` (`readelf -d`), and prepares — **but never executes** — the release.
 
-Version scheme: `<upstream-sharp-version>-electron.N` — the version always names the exact `sharp` release it tracks; `N` bumps for this package's own revisions.
+Version scheme: `<upstream-sharp-version>-electron.N` — the version always names the exact `sharp` release it tracks; `N` bumps for this package's own revisions. Every version this scheme produces is, by construction, a semver **prerelease** (the `-electron.N` suffix), which matters at publish time — see below.
 
 ### Releasing
 
 `npm run release <version>` ([scripts/release.sh](scripts/release.sh)) runs the full pipeline, then syncs every version reference — `package/package.json`'s `version` and its `sharp` fallback dependency (pinned to the upstream part of the new version), and this README's install snippets — then prints the remaining steps. **Publishing is always a manual, human-confirmed action** — no script or command in this repo runs `npm publish`, `git tag`, or `git push` on its own. That's a deliberate design decision, not a missing feature: a bad automated judgment call shipping silently to consumers is a worse failure mode than a release waiting a day for review.
+
+**Publishing requires `--tag latest`, every time**: `npm publish --tag latest` (not plain `npm publish`). Because every version has the `-electron.N` suffix, npm/semver treats it as a prerelease and refuses to move the `latest` dist-tag implicitly (`npm error: You must specify a tag using --tag when publishing a prerelease version`) — without `--tag latest`, a bare `npm install @janhapke/sharp-electron` (or the version-less `overrides` form) would resolve to nothing. `--access public` is not needed on the command line; it's already set via `package/package.json`'s `publishConfig`.
 
 Note for the published package: `package/README.md` is generated at package time (a copy of this file, since npmjs.com displays the published package's own README) — edit this file, never that copy.
 

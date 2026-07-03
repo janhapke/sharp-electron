@@ -47,8 +47,16 @@ Remaining manual steps:
        git add -A && git commit -m "Release $VERSION"
   3. Tag it:
        git tag v$VERSION
-  4. Publish (this is the step this script deliberately does not do for you):
-       cd package && npm publish --access public
+  4. Publish (this is the step this script deliberately does not do for you).
+     --tag latest is required, not optional: every version this project
+     publishes has a '-electron.N' suffix, which npm/semver treats as a
+     prerelease, so a plain 'npm publish' refuses to touch the 'latest' dist-tag
+     on its own (npm error: "You must specify a tag using --tag when publishing
+     a prerelease version"). Without --tag latest, 'npm install @janhapke/sharp-electron'
+     with no version (or the 'latest' dist-tag) would resolve to nothing.
+     --access public is no longer needed on the command line — it's already
+     set via package/package.json's publishConfig.
+       cd package && npm publish --tag latest
   5. Push:
        git push && git push --tags
 
