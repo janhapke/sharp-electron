@@ -42,7 +42,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-13, macos-14, windows-2022]
+        # Deliberately using -latest here rather than pinning a specific OS
+        # version: this job only needs "a real macOS/Windows runner" (nothing
+        # about the fallback test is version-specific), and pinned versions get
+        # silently retired by GitHub on their own schedule — a previously-pinned
+        # macos-13 entry here queued forever once that image was retired, since
+        # a request for a nonexistent runner just hangs rather than failing fast.
+        os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
