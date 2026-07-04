@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.35.3-electron.1
+
+- Fixed the "`sharp` is also a direct dependency" install recipe in the README: the documented `"overrides": { "sharp": "$sharp" }` silently broke this package's own non-Linux fallback and TypeScript types, because npm overrides recurse by default and rewrote this package's own internal `sharp` dependency back into a circular self-reference (`require('sharp')` inside the fallback resolved to an empty `{}`, no install-time error). Fixed by documenting the nested override form instead (`"sharp": { ".": "$sharp", "sharp": "0.35.3" }`), verified against a real install on both the patched and simulated-fallback paths.
+- No code or binary changes — same build as 0.35.3-electron.0, republished so the corrected install docs are what npmjs.com actually shows.
+
+## 0.35.3-electron.0
 
 First release, targeting `sharp` `0.35.3` / `sharp-libvips` `1.3.2`.
 

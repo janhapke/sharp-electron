@@ -17,7 +17,7 @@ Use npm `overrides` — not a direct `import` — so that **every** `require('sh
 ```json
 {
   "overrides": {
-    "sharp": "npm:@janhapke/sharp-electron@0.35.3-electron.0"
+    "sharp": "npm:@janhapke/sharp-electron@0.35.3-electron.1"
   }
 }
 ```
@@ -26,20 +26,25 @@ Use npm `overrides` — not a direct `import` — so that **every** `require('sh
 npm install
 ```
 
-That's it — no source changes anywhere in your project. The `npm:` alias syntax is required: the override target's package name differs from `sharp`, so a plain `"sharp": "0.35.3-electron.0"` would tell npm to look for a package literally named `sharp` at that version, which doesn't exist.
+That's it — no source changes anywhere in your project. The `npm:` alias syntax is required: the override target's package name differs from `sharp`, so a plain `"sharp": "0.35.3-electron.1"` would tell npm to look for a package literally named `sharp` at that version, which doesn't exist.
 
-If `sharp` is also a **direct dependency** of your project, npm rejects an override that conflicts with it (`EOVERRIDE`). In that case point the dependency itself at this package and let the override reference it:
+If `sharp` is also a **direct dependency** of your project, npm rejects an override that conflicts with it (`EOVERRIDE`). In that case point the dependency itself at this package and let the override reference it — but use the **nested** override form, not a plain `"sharp": "$sharp"`:
 
 ```json
 {
   "dependencies": {
-    "sharp": "npm:@janhapke/sharp-electron@0.35.3-electron.0"
+    "sharp": "npm:@janhapke/sharp-electron@0.35.3-electron.1"
   },
   "overrides": {
-    "sharp": "$sharp"
+    "sharp": {
+      ".": "$sharp",
+      "sharp": "0.35.3"
+    }
   }
 }
 ```
+
+The plain (non-nested) form, `"overrides": { "sharp": "$sharp" }`, looks like it should be equivalent but silently isn't: npm overrides are recursive by default, so it also rewrites `@janhapke/sharp-electron`'s **own internal** `sharp` dependency (the one its non-Linux fallback and its TypeScript types depend on) back into itself. The result isn't an install error — it resolves, but `require('sharp')` inside the fallback path becomes a self-referential circular require that silently returns an empty `{}`, so calling it throws `sharp is not a function` deep inside your own code, and `tsc` fails to resolve `sharp`'s types. The `.` key above pins the override for direct requests to `$sharp` as before, while the nested `"sharp": "0.35.3"` key scopes a *second*, narrower override that applies only *inside* the resolved package's own tree, restoring its internal dependency to the real, unpatched `sharp` it actually needs there. Confirmed against a real install: without the nested form, `node_modules/sharp/node_modules/sharp` doesn't exist at all; with it, `node_modules/sharp/node_modules/sharp` is `sharp@0.35.3`, and the fallback works correctly on a simulated non-Linux platform.
 
 ### Local testing against an unpublished build
 

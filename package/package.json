@@ -1,6 +1,6 @@
 {
   "name": "@janhapke/sharp-electron",
-  "version": "0.35.3-electron.0",
+  "version": "0.35.3-electron.1",
   "description": "Electron-safe replacement for sharp on Linux; re-exports the real sharp unmodified everywhere else",
   "author": "Jan Hapke <sharp-electron@janhapke.com>",
   "type": "commonjs",
