@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.35.4-electron.1
+
+No upstream/patch changes — same `sharp` 0.35.4 / `sharp-libvips` 1.3.3 build as `0.35.4-electron.0`. Fixes a self-reference bug in this package's own internal dependency that a plain `overrides` install could trigger.
+
+- **The internal, non-Linux fallback dependency on real `sharp` is now installed under the aliased name `sharp-upstream`, not `sharp`** (`package/package.json`'s `"sharp-upstream": "npm:sharp@0.35.4"`, matched by `require('sharp-upstream')` in `index.js` and `index.d.ts`). Previously it was declared as a plain `"sharp"` dependency, which meant a consumer's `"overrides": { "sharp": ... }` rule — the documented, recommended install method — applied recursively to this package's own internal dependency too, silently rewriting it into a self-referential circular reference. No install-time error: `require('sharp')` inside the non-Linux fallback returned `{}` at runtime, and — the symptom that surfaced this — `tsc` failed to resolve real `sharp`'s types through `index.d.ts`'s `import sharp = require('sharp')`, producing spurious consumer-side errors like `Module "sharp" has no exported member 'Channels'`. Found and fixed while testing `0.35.4-electron.0` locally in a real consuming project.
+- Discovered along the way, and worth recording since it cost significant diagnosis time: `overrides`/`resolutions` pointed at a local `file:` directory or a packed `.tgz` (as previously documented under "Local testing against an unpublished build") both reliably trigger separate bugs in npm's own dependency resolver (`@npmcli/arborist`) once the consuming project's dependency graph is large enough — a directory override can crash `npm install` outright (a `Promise.all`-driven race constructing `file:` "Link" nodes), and a tarball override can leave a broken symlink pointing at the `.tgz` file itself instead of extracting it. Neither is fixable from this package's `package.json`. The README's local-testing section now documents a reliable workaround (install real `sharp` normally, then physically replace it with this repo's built `package/`) instead of the `overrides`-based recipe.
+- Both test gates still pass; no code affecting the Linux patched build changed.
+
 ## 0.35.4-electron.0
 
 Targets `sharp` `0.35.4` / `sharp-libvips` `1.3.3` (libvips `8.18.6`, up from `8.18.3`).

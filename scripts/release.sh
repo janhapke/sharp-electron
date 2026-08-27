@@ -23,9 +23,11 @@ node -e "
   const path = 'package/package.json';
   const p = JSON.parse(fs.readFileSync(path));
   p.version = '$VERSION';
-  // The non-Linux fallback re-exports real sharp — keep it pinned to the
-  // upstream version this release tracks (the part before '-electron.N').
-  p.dependencies.sharp = '$VERSION'.split('-')[0];
+  // The non-Linux fallback re-exports real sharp, aliased to 'sharp-upstream'
+  // (deliberately not named 'sharp' — see package/index.d.ts) — keep it
+  // pinned to the upstream version this release tracks (the part before
+  // '-electron.N').
+  p.dependencies['sharp-upstream'] = 'npm:sharp@' + '$VERSION'.split('-')[0];
   fs.writeFileSync(path, JSON.stringify(p, null, 2) + '\n');
 "
 

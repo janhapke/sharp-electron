@@ -17,7 +17,7 @@ Use npm `overrides` — not a direct `import` — so that **every** `require('sh
 ```json
 {
   "overrides": {
-    "sharp": "npm:@janhapke/sharp-electron@0.35.4-electron.0"
+    "sharp": "npm:@janhapke/sharp-electron@0.35.4-electron.1"
   }
 }
 ```
@@ -28,41 +28,39 @@ npm install
 
 That's it — no source changes anywhere in your project. The `npm:` alias syntax is required: the override target's package name differs from `sharp`, so a plain `"sharp": "0.35.3-electron.1"` would tell npm to look for a package literally named `sharp` at that version, which doesn't exist.
 
-If `sharp` is also a **direct dependency** of your project, npm rejects an override that conflicts with it (`EOVERRIDE`). In that case point the dependency itself at this package and let the override reference it — but use the **nested** override form, not a plain `"sharp": "$sharp"`:
+If `sharp` is also a **direct dependency** of your project, npm rejects an override that conflicts with it (`EOVERRIDE`). In that case point the dependency itself at this package and let the override reference it via the **nested** form, not a plain `"sharp": "$sharp"` (npm requires the nested form whenever a root dependency and an override target the same package name, regardless of what either resolves to):
 
 ```json
 {
   "dependencies": {
-    "sharp": "npm:@janhapke/sharp-electron@0.35.4-electron.0"
+    "sharp": "npm:@janhapke/sharp-electron@0.35.4-electron.1"
   },
   "overrides": {
-    "sharp": {
-      ".": "$sharp",
-      "sharp": "0.35.3"
-    }
+    "sharp": "$sharp"
   }
 }
 ```
 
-The plain (non-nested) form, `"overrides": { "sharp": "$sharp" }`, looks like it should be equivalent but silently isn't: npm overrides are recursive by default, so it also rewrites `@janhapke/sharp-electron`'s **own internal** `sharp` dependency (the one its non-Linux fallback and its TypeScript types depend on) back into itself. The result isn't an install error — it resolves, but `require('sharp')` inside the fallback path becomes a self-referential circular require that silently returns an empty `{}`, so calling it throws `sharp is not a function` deep inside your own code, and `tsc` fails to resolve `sharp`'s types. The `.` key above pins the override for direct requests to `$sharp` as before, while the nested `"sharp": "0.35.3"` key scopes a *second*, narrower override that applies only *inside* the resolved package's own tree, restoring its internal dependency to the real, unpatched `sharp` it actually needs there. Confirmed against a real install: without the nested form, `node_modules/sharp/node_modules/sharp` doesn't exist at all; with it, `node_modules/sharp/node_modules/sharp` is `sharp@0.35.3`, and the fallback works correctly on a simulated non-Linux platform.
+This package's own internal fallback dependency (the real, unpatched `sharp` its non-Linux build and its TypeScript types re-export) is deliberately installed under the aliased name `sharp-upstream`, not `sharp` — so an `overrides` rule targeting `"sharp"` can never recurse into it, however the rule is written. (Earlier releases installed it as a plain `sharp` dependency, which meant a *plain* `overrides` rule silently rewrote that internal dependency back into a self-referential circular reference — no install error, but `require('sharp')` inside the fallback returned `{}` at runtime and `tsc` failed to resolve `sharp`'s types. If you hit that, upgrade to `0.35.4-electron.1` or later.)
 
 ### Local testing against an unpublished build
 
-To test a locally built copy of this repo (see [Building from source](#building-from-source)) instead of the published package:
+To test a locally built copy of this repo (see [Building from source](#building-from-source)) against a real consuming project, **don't** point an `overrides` rule at `file:../sharp-electron/package` or a packed `.tgz` — both reliably trigger bugs in npm's dependency resolver (`@npmcli/arborist`) once the consuming project's dependency graph is large enough: a `file:`-directory override crashes `npm install` outright (`Cannot read properties of null (reading 'package')`, a race in how arborist links `file:` "Link" nodes when more than one edge resolves to the same target concurrently — confirmed via `Promise.all` in the crash's own stack trace), and overriding to a packed tarball can leave a **broken symlink pointing at the `.tgz` file itself** instead of extracting it. Both are npm bugs, not something fixable from this package's `package.json`.
 
-```json
-{
-  "overrides": {
-    "sharp": "file:../sharp-electron/package"
-  }
-}
-```
-
-After rebuilding this package, force a refresh in the consuming project — an `overrides`-resolved `file:` target gets **copied** into `node_modules/sharp`, not symlinked, so a plain `npm install` may not pick up the change:
+The reliable way to test a local build: let npm install the *real* `sharp` normally (no override at all — this sidesteps the buggy code path entirely, since `overrides` never enters the picture), then physically replace every real-`sharp` directory it created with this repo's built `package/`:
 
 ```bash
-rm -rf node_modules/sharp && npm install
+# in your consuming project, with a normal "sharp": "^X.Y.Z" dependency (no override):
+rm -rf node_modules && npm install
+
+# then, for every node_modules/**/sharp directory npm actually created:
+find node_modules -maxdepth 4 -iname sharp -type d | while read -r d; do
+  rm -rf "$d"
+  cp -r ../sharp-electron/package "$d"
+done
 ```
+
+Re-run the `find`/`cp -r` loop after every rebuild of this repo (`npm run package`) — there's no live symlink here, just a plain directory copy, so changes don't propagate on their own.
 
 ### Why `overrides`, not a direct import
 
@@ -155,7 +153,8 @@ Three hard-won, non-obvious decisions live in [scripts/package-local.sh](scripts
 
 - **`libvips-cpp.so` sits next to the `.node` addon, found via RPATH — and it must be old-style `DT_RPATH`, not `DT_RUNPATH`.** `patchelf --set-rpath` produces `DT_RUNPATH` by default, which the loader consults *after* `LD_LIBRARY_PATH` — so anything else in a real consumer's environment or `node_modules` that provides the same SONAME can win over the co-located patched copy. `patchelf --force-rpath` produces `DT_RPATH`, consulted *before* `LD_LIBRARY_PATH`, so the co-located copy always wins for the addon's own direct dependency. (Setting `process.env.LD_LIBRARY_PATH` from JavaScript doesn't work at all: glibc reads it once at process start, not per `dlopen()`.)
 - **The SONAME is kept identical to upstream's** — that's what makes the per-process SONAME deduplication safe *when everything resolves to this package* (see [Why overrides](#why-overrides-not-a-direct-import)) and is why `overrides` is the recommended install method rather than an optional nicety.
-- **`package/` runs its own `npm install` during packaging** because npm does not recursively install a `file:` dependency's own dependencies the way it does for registry packages — without this, the non-Linux `require('sharp')` fallback breaks in every local-testing setup. Relatedly, `package/package.json` must **not** declare `"os"`/`"cpu"` restrictions: those make npm skip installing the package entirely on other platforms, which would prevent the fallback from ever existing there.
+- **`package/` runs its own `npm install` during packaging** because npm does not recursively install a `file:` dependency's own dependencies the way it does for registry packages — without this, the non-Linux `require('sharp-upstream')` fallback breaks in every local-testing setup. Relatedly, `package/package.json` must **not** declare `"os"`/`"cpu"` restrictions: those make npm skip installing the package entirely on other platforms, which would prevent the fallback from ever existing there.
+- **The fallback's real-`sharp` dependency is named `sharp-upstream`, not `sharp`** (`"sharp-upstream": "npm:sharp@<version>"` in `package/package.json`, matched by `require('sharp-upstream')` in `index.js` and `index.d.ts`). A consumer's `overrides` rule targeting `"sharp"` applies recursively to every dependency edge named `sharp` anywhere in the tree — including this package's own internal one, since npm doesn't distinguish "the package I'm overriding" from "a same-named dependency three levels inside it." Without the alias, that self-reference resolves silently (no install error) into a circular reference: `require('sharp')` inside the fallback returns `{}` at runtime, and `index.d.ts`'s `import sharp = require('sharp')` can't resolve real `sharp`'s types, producing spurious `tsc` errors in consumers (`has no exported member 'X'`, `can only be referenced with ECMAScript imports`) with no indication the cause is this package. The alias sidesteps the collision structurally, the same reason this package's own published name isn't `sharp`.
 
 ### Test gates
 

@@ -14,6 +14,10 @@
 // via process.env.LD_LIBRARY_PATH instead: glibc parses that once at process
 // start, not per dlopen() call, so setting it here doesn't reliably work.
 //
+// The fallback below requires 'sharp-upstream', not 'sharp' — see
+// package.json's dependencies for why (an aliased npm:sharp@<version>
+// dependency, deliberately not named 'sharp').
+//
 // linux on any other arch (arm64, etc.): no patched build exists yet. Throw a
 // clear, specific error here rather than silently falling back to real
 // `sharp` — that fallback would just defer the exact crash this package
@@ -31,5 +35,5 @@ if (process.platform === 'linux') {
     );
   }
 } else {
-  module.exports = require('sharp');
+  module.exports = require('sharp-upstream');
 }
