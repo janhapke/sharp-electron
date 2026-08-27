@@ -1,5 +1,5 @@
 diff --git a/build/posix.sh b/build/posix.sh
-index 3ab5abb..0ec66eb 100755
+index 5088515..896cdb2 100755
 --- a/build/posix.sh
 +++ b/build/posix.sh
 @@ -379,9 +379,29 @@ if [ "$LINUX" = true ]; then
@@ -23,7 +23,7 @@ index 3ab5abb..0ec66eb 100755
 +  # consumers can reach it after linking against this library.
 +  cp "$PACKAGE/extra/glib_wrapper.h" cplusplus/include/vips/
 +  sed -i'.bak' "s|#include <vips/vips.h>|#include <vips/vips.h>\n#include \"glib_wrapper.h\"|" cplusplus/include/vips/VImage8.h
-+  sed -i'.bak' -e "s/g_object_ref(/vips_g_object_ref(/g" -e "s/g_object_unref(/vips_g_object_unref(/g" cplusplus/include/vips/VImage8.h
++  sed -i'.bak' -e "s/g_object_ref(/vips_g_object_ref(/g" -e "s/g_object_unref(/vips_g_object_unref(/g" -e "s/g_value_unset(/vips_g_value_unset(/g" cplusplus/include/vips/VImage8.h
 +  sed -i'.bak' "s/'VImage8.h',/'VImage8.h',\n    'glib_wrapper.h',/" cplusplus/include/vips/meson.build
 +  # sharp-electron: hide the full glib/gobject symbol surface (previously only
 +  # g_param_spec_types was localized) to avoid collisions with a second,
@@ -37,10 +37,10 @@ index 3ab5abb..0ec66eb 100755
  sed -i'.bak' "/subdir('man')/{N;N;N;N;d;}" meson.build
 diff --git a/extra/glib_wrapper.c b/extra/glib_wrapper.c
 new file mode 100644
-index 0000000..3198eb1
+index 0000000..c5dadce
 --- /dev/null
 +++ b/extra/glib_wrapper.c
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,36 @@
 +#include "glib_wrapper.h"
 +
 +gpointer vips_g_object_ref(gpointer object) {
@@ -49,6 +49,10 @@ index 0000000..3198eb1
 +
 +void vips_g_object_unref(gpointer object) {
 +  g_object_unref(object);
++}
++
++void vips_g_value_unset(GValue *value) {
++  g_value_unset(value);
 +}
 +
 +gpointer vips_g_malloc(gsize n_bytes) {
@@ -75,10 +79,10 @@ index 0000000..3198eb1
 +}
 diff --git a/extra/glib_wrapper.h b/extra/glib_wrapper.h
 new file mode 100644
-index 0000000..67730e5
+index 0000000..68557c1
 --- /dev/null
 +++ b/extra/glib_wrapper.h
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,70 @@
 +#ifndef VIPS_GLIB_WRAPPER_H
 +#define VIPS_GLIB_WRAPPER_H
 +
@@ -107,6 +111,16 @@ index 0000000..67730e5
 +
 +VIPS_G_WRAPPER_EXPORT gpointer vips_g_object_ref(gpointer object);
 +VIPS_G_WRAPPER_EXPORT void vips_g_object_unref(gpointer object);
++
++/*
++ * Also from VImage8.h, inline: VOption::Pair's destructor calls g_value_unset
++ * directly on its embedded GValue. Missed by the original grep-based pass
++ * (which only looked at sharp's own *.cc files, not libvips's own headers,
++ * and only caught g_object_ref/g_object_unref in VImage8.h) — found instead
++ * during a later /rebuild-for-version run's re-check of libvips's headers.
++ * Present since at least libvips 8.18.3, not something new upstream added.
++ */
++VIPS_G_WRAPPER_EXPORT void vips_g_value_unset(GValue *value);
 +
 +/*
 + * The rest of this set was found empirically, not guessed upfront: grepping

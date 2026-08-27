@@ -1,8 +1,8 @@
 {
   "$schema-comment": "Source of truth for which glib/gobject symbols this project renames and re-exports as vips_g_* wrappers (see extra/glib_wrapper.c/.h in vendor/sharp-libvips), and why each one is there. /rebuild-for-version and any human doing a version bump should diff a fresh grep of sharp's source against this list, not against the prose in README.md.",
   "targetVersions": {
-    "sharp": "0.35.3",
-    "sharpLibvips": "1.3.2"
+    "sharp": "0.35.4",
+    "sharpLibvips": "1.3.3"
   },
   "symbols": [
     {
@@ -20,6 +20,14 @@
       "risk": "load-bearing",
       "riskDetail": "Same reasoning as g_object_ref — must come from the same glib copy that did the matching ref.",
       "foundVia": "grep (guessed first, then confirmed as the crash cause during initial diagnosis)"
+    },
+    {
+      "name": "g_value_unset",
+      "origin": "libvips-header",
+      "originDetail": "cplusplus/include/vips/VImage8.h, VOption::Pair's destructor (~Pair()) — header-only, inlined into sharp.node wherever vips::VOption is used. Present since at least libvips 8.18.3 (confirmed via upstream source at that tag), not something newly introduced by the 0.35.4/1.3.3 bump.",
+      "risk": "load-bearing",
+      "riskDetail": "Same class of risk as g_object_ref/g_object_unref: releases a GValue whose registered GType lives in whichever glib copy holds libvips's private type registry.",
+      "foundVia": "rebuild-for-version header re-check (Step 3) against sharp 0.35.4 / sharp-libvips 1.3.3 — missed by the original grep pass because that pass only exhaustively covered sharp's own src/*.cc, not libvips's own public headers beyond the already-known g_object_ref/g_object_unref calls"
     },
     {
       "name": "g_malloc",

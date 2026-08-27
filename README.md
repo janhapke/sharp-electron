@@ -17,7 +17,7 @@ Use npm `overrides` — not a direct `import` — so that **every** `require('sh
 ```json
 {
   "overrides": {
-    "sharp": "npm:@janhapke/sharp-electron@0.35.3-electron.1"
+    "sharp": "npm:@janhapke/sharp-electron@0.35.4-electron.0"
   }
 }
 ```
@@ -33,7 +33,7 @@ If `sharp` is also a **direct dependency** of your project, npm rejects an overr
 ```json
 {
   "dependencies": {
-    "sharp": "npm:@janhapke/sharp-electron@0.35.3-electron.1"
+    "sharp": "npm:@janhapke/sharp-electron@0.35.4-electron.0"
   },
   "overrides": {
     "sharp": {
