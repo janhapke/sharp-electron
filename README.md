@@ -90,6 +90,23 @@ The failure mode if you miss one: this package and the real `sharp` both ship a 
 
   Diagnose by checking the packaged output directly, not just build logs: `find <packaged-app>/resources/app.asar.unpacked -iname 'libvips-cpp.so*'` — if it's missing, you're hitting #1; if the addon is there but the `.so` isn't, you're hitting #2.
 
+- **`npm error Invalid comparator` from `npm install`/`npm ci`, before any code runs at all.** This is an npm bug, not a `sharp-electron` bug — but it's directly triggered by following the [Usage](#usage) instructions above verbatim. Root cause: npm's arborist cannot resolve an `overrides` rule targeting a package name (`sharp`) when your **root** `package.json`'s own dependency of that same name is declared via an `npm:` alias (exactly the form both `overrides` snippets above use: `"sharp": "npm:@janhapke/sharp-electron@..."`). The alias means your root "version" for `sharp` isn't an ordinary semver range, and arborist's overrides matcher throws trying to compare it against the override's version selector — regardless of whether your override is the flat or nested form.
+
+  There's no `package.json`-only fix for this — it reproduces with either override shape. Two ways out, in order of preference:
+
+  1. **Drop the `npm:` alias in favor of the plain `overrides`-only form** (top of [Usage](#usage)): don't add `sharp` as a direct/dev dependency at all, just the single `overrides` entry pointing at this package by its real name. This is exactly what that form was already meant for — the crash only happens when a root dependency *and* an override target the same name *and* the root side is an alias. If nothing else in your tree needs `sharp` as a direct dependency, this sidesteps the bug entirely and keeps the full structural guarantee `overrides` gives (see [Why overrides](#why-overrides-not-a-direct-import)).
+  2. **If you do need `sharp` as a direct/dev dependency via the `npm:` alias** (e.g. your own code does `import sharp from 'sharp'` and you want that exact package resolved, not just an override rewriting transitive requires), you can't use `overrides` for this package at all without hitting the crash. Fall back to a targeted `postinstall` step that strips any other dependency's own bundled, nested copy of `sharp` so its `require('sharp')` has nothing local to resolve to and falls through to your root, aliased install instead:
+
+     ```json
+     {
+       "scripts": {
+         "postinstall": "node -e \"require('fs').rmSync('node_modules/<the-other-dependency>/node_modules', { recursive: true, force: true })\""
+       }
+     }
+     ```
+
+     This is narrower than `overrides`' guarantee — it only closes the gap for the specific nested copy you name, not structurally for anything that might bundle `sharp` in the future. If you add another dependency that also bundles its own `sharp`, you need to extend this by hand; nothing will warn you if you miss one (the symptom would be the original SONAME-collision failure mode above, not an install-time error). Revisit option 1 if you can.
+
 ## Building from source
 
 Requires only Docker on the host — the entire toolchain runs in a container matching `sharp`'s own CI environment.
